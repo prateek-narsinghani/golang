@@ -15,113 +15,71 @@ import (
 var MyMap = map[string]string{}
 
 var m = sync.RWMutex{} 
-// var wg = sync.WaitGroup{}
 
-type Value struct{
-	Value string `json: "Value"`
+type Form struct{
+	Key string `json: "Key"`
+	Value string `json: "Value"` 
 }
 
 func addValue(w http.ResponseWriter, r *http.Request){
-	m.Lock()
-	var value Value
-	key := mux.Vars(r)["key"]
+	
+	var form Form
+
+	form.Key = mux.Vars(r)["key"]
 	reqBody, err :=ioutil.ReadAll(r.Body)
 	if err != nil {
-		fmt.Fprintf(w, "Kindly enter details")
+		panic(err)
 	}
-	json.Unmarshal(reqBody, &value)
-	MyMap[key] = value.Value
-	w.WriteHeader(http.StatusCreated)
-	fmt.Fprint(w, "added value")
+	
+	json.Unmarshal(reqBody, &form)
+	
+	m.Lock()
+	fmt.Printf("for key: %s adding value:  %s\n", form.Key, form.Value)
+	MyMap[form.Key] = form.Value
+	fmt.Printf("for key: %s value added: %s\n", form.Key, form.Value)
 	m.Unlock()
+	
+	w.WriteHeader(http.StatusCreated)
 }
 
 func deleteValue(w http.ResponseWriter, r *http.Request){
+	var form Form
+	form.Key = mux.Vars(r)["key"]
+
 	m.Lock()
-	key := mux.Vars(r)["key"]
-	delete(MyMap, key)
-	fmt.Fprint(w, "deleted value")
+	
+	fmt.Printf("for key: %s deleting\n", form.Key)
+	
+	_, ok:=MyMap[form.Key]
+	if ok{
+		delete(MyMap, form.Key)
+	}
+	fmt.Printf("for key: %s value deleted: %t\n", form.Key, ok)
+	
 	m.Unlock()
+
 }
 
 func getValue(w http.ResponseWriter, r *http.Request){
 	m.RLock()
 	key:= mux.Vars(r)["key"]
-	if val,ok:=MyMap[key];ok{
-		fmt.Fprint(w,val)
+	fmt.Printf("Iniating get for: %s\n", key)
+	if val,ok:=MyMap[key]; ok {
+		
+		fmt.Printf("getting %s : %s\n", key, val)
+	
 	}else{
-		fmt.Fprint(w,"value not found")
+		fmt.Printf("Value not found for: %s \n", key)
 	}
 	m.RUnlock()
+	
 }
 
-// func test(w http.ResponseWriter, r *http.Request){
-// // 	wg.Add(2)
-// // 	//sending put req for {go:lang}
-// 	go func(){
-// 		client := &http.Client{}
-// 		json,err := json.Marshal(Value{Value: "lang"})
-// 		if err!=nil{
-// 			panic(err)
-// 		}
-// 		req,err := http.NewRequest(http.MethodPut,"http://localhost:8080/key/go", bytes.NewBuffer(json))
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-// 		resp, err := client.Do(req)
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		// fmt.Println(resp.StatusCode)
-// 		body, _ := ioutil.ReadAll(resp.Body)
-// 		sb := string(body)
-// 		fmt.Fprint(w, sb)
-// 		// wg.Done()
-// 	}()
-
-// 	//sending put req for {go:language}
-// 	go func(){
-// 		client := &http.Client{}
-// 		json,err := json.Marshal(Value{Value: "language"})
-// 		if err!=nil{
-// 			panic(err)
-// 		}
-// 		req,err := http.NewRequest(http.MethodPut,"http://localhost:8080/key/go", bytes.NewBuffer(json))
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
-// 		resp , err := client.Do(req)
-// 		if err != nil {
-// 			panic(err)
-// 		}
-// 		fmt.Println(resp.StatusCode)
-// 		wg.Done()
-// 	}()
-// 	// //sending get req for go
-// 	// go func(){
-// 	// 	resp, err := http.Get("http://localhost:8080/key/go")
-// 	// 	if err != nil {
-// 	// 		panic(err)
-// 	// 	}
-// 	// 	body, err := ioutil.ReadAll(resp.Body)
-// 	// 	if err != nil {
-// 	// 		panic(err)
-// 	// 	}
-// 	// 	sb := string(body)
-// 	// 	fmt.Fprint(w,sb)
-// 	// 	}()
-// }
 
 func main(){
 	router:= mux.NewRouter().StrictSlash(true)
 	router.HandleFunc("/key/{key}", getValue).Methods("GET")
 	router.HandleFunc("/key/{key}", addValue).Methods("PUT")
 	router.HandleFunc("/key/{key}", deleteValue).Methods("DELETE")
-	// router.HandleFunc("/test", test).Methods("GET")
 	log.Fatal(http.ListenAndServe(":8080", router))
-	// fmt.Print("hi there")
-	// wg.Wait()
 }
-
