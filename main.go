@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -9,75 +10,63 @@ import (
 	"sync"
 
 	"github.com/gorilla/mux"
+	_ "github.com/mattn/go-sqlite3"
 )
 
+var db, _ = sql.Open("sqlite3", "./first-app.db")
 
-var MyMap = map[string]string{}
+var m = sync.RWMutex{}
 
-var m = sync.RWMutex{} 
-
-type Form struct{
-	Key string `json: "Key"`
-	Value string `json: "Value"` 
+type Form struct {
+	Key       string `json: "Key"`
+	Value     string `json: "Value"`
+	Timestamp string `json: "Timestamp"`
 }
 
-func addValue(w http.ResponseWriter, r *http.Request){
-	
-	var form Form
+func addValue(w http.ResponseWriter, r *http.Request) {
 
+	var form Form
 	form.Key = mux.Vars(r)["key"]
-	reqBody, err :=ioutil.ReadAll(r.Body)
+	reqBody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		panic(err)
 	}
-	
+	stmt, _ := db.Prepare("INSERT INTO myTable(key, value) VALUES (?,?)")
 	json.Unmarshal(reqBody, &form)
-	
 	m.Lock()
-	fmt.Printf("for key: %s adding value:  %s\n", form.Key, form.Value)
-	MyMap[form.Key] = form.Value
-	fmt.Printf("for key: %s value added: %s\n", form.Key, form.Value)
+	stmt.Exec(form.Key, form.Value)
 	m.Unlock()
-	
 	w.WriteHeader(http.StatusCreated)
 }
 
-func deleteValue(w http.ResponseWriter, r *http.Request){
+func deleteValue(w http.ResponseWriter, r *http.Request) {
 	var form Form
 	form.Key = mux.Vars(r)["key"]
-
+	stmt, _ := db.Prepare("DELETE FROM myTable WHERE key = ? ")
 	m.Lock()
-	
-	fmt.Printf("for key: %s deleting\n", form.Key)
-	
-	_, ok:=MyMap[form.Key]
-	if ok{
-		delete(MyMap, form.Key)
-	}
-	fmt.Printf("for key: %s value deleted: %t\n", form.Key, ok)
-	
+	stmt.Exec(form.Key)
 	m.Unlock()
 
 }
 
-func getValue(w http.ResponseWriter, r *http.Request){
+func getValue(w http.ResponseWriter, r *http.Request) {
+	var key, value, time string
+	key = mux.Vars(r)["key"]
 	m.RLock()
-	key:= mux.Vars(r)["key"]
-	fmt.Printf("Iniating get for: %s\n", key)
-	if val,ok:=MyMap[key]; ok {
-		
-		fmt.Printf("getting %s : %s\n", key, val)
-	
+	row := db.QueryRow(`SELECT key, value, timestamp from myTable where key = ?`, key)
+	err:= row.Scan(&key, &value, &time)
+	if err == sql.ErrNoRows{
+		fmt.Fprintf(w,"value not found")
 	}else{
-		fmt.Printf("Value not found for: %s \n", key)
+		fmt.Fprintf(w,"%s %s %s\n", key, value, time)
 	}
 	m.RUnlock()
-	
 }
 
-
-func main(){
-	router:= mux.NewRouter().StrictSlash(true)
+func main() {
+	stmt, _ := db.Prepare("CREATE TABLE IF NOT EXISTS myTable (key TEXT PRIMARY KEY, value TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
+	stmt.Exec()
+	router := mux.NewRouter().StrictSlash(true)
 	router.HandleFunc("/key/{key}", getValue).Methods("GET")
 	router.HandleFunc("/key/{key}", addValue).Methods("PUT")
 	router.HandleFunc("/key/{key}", deleteValue).Methods("DELETE")
