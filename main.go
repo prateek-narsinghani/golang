@@ -1,26 +1,28 @@
 package main
 
 import (
-	"database/sql"
+	// "database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/mux"
-	_ "github.com/mattn/go-sqlite3"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
-var db, _ = sql.Open("sqlite3", "./first-app.db")
+var db, _ = gorm.Open(sqlite.Open("first-app.db"), &gorm.Config{})
 
 var m = sync.RWMutex{}
 
 type Form struct {
-	Key       string `json: "Key"`
+	Key       string `gorm:"primaryKey"`
 	Value     string `json: "Value"`
-	Timestamp string `json: "Timestamp"`
+	Timestamp time.Time `gorm:"autoUpdateTime" json: "Timestamp"`
 }
 
 func addValue(w http.ResponseWriter, r *http.Request) {
@@ -31,10 +33,15 @@ func addValue(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		panic(err)
 	}
-	stmt, _ := db.Prepare("INSERT INTO myTable(key, value) VALUES (?,?)")
+	
 	json.Unmarshal(reqBody, &form)
 	m.Lock()
-	stmt.Exec(form.Key, form.Value)
+	err=db.Create(&Form{Key:form.Key,
+		Value:form.Value}).Error
+	if err!=nil{
+		db.Save(&Form{Key:form.Key,
+			Value:form.Value})
+	}
 	m.Unlock()
 	w.WriteHeader(http.StatusCreated)
 }
@@ -42,30 +49,30 @@ func addValue(w http.ResponseWriter, r *http.Request) {
 func deleteValue(w http.ResponseWriter, r *http.Request) {
 	var form Form
 	form.Key = mux.Vars(r)["key"]
-	stmt, _ := db.Prepare("DELETE FROM myTable WHERE key = ? ")
+	
 	m.Lock()
-	stmt.Exec(form.Key)
+	
+	db.Where("key = ?",form.Key).Delete(&Form{})
 	m.Unlock()
 
 }
 
 func getValue(w http.ResponseWriter, r *http.Request) {
-	var key, value, time string
+	var key string
+	var form Form
 	key = mux.Vars(r)["key"]
 	m.RLock()
-	row := db.QueryRow(`SELECT key, value, timestamp from myTable where key = ?`, key)
-	err:= row.Scan(&key, &value, &time)
-	if err == sql.ErrNoRows{
+	err := db.Where("key=?",key).First(&form).Error
+	if err != nil{
 		fmt.Fprintf(w,"value not found")
 	}else{
-		fmt.Fprintf(w,"%s %s %s\n", key, value, time)
+		fmt.Fprintf(w,"%s %s %s\n", form.Key, form.Value, form.Timestamp.String())
 	}
 	m.RUnlock()
 }
 
 func main() {
-	stmt, _ := db.Prepare("CREATE TABLE IF NOT EXISTS myTable (key TEXT PRIMARY KEY, value TEXT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)")
-	stmt.Exec()
+	db.AutoMigrate(&Form{})
 	router := mux.NewRouter().StrictSlash(true)
 	router.HandleFunc("/key/{key}", getValue).Methods("GET")
 	router.HandleFunc("/key/{key}", addValue).Methods("PUT")
